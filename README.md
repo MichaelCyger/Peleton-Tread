@@ -122,4 +122,4 @@ There's an Easter egg in the sleep screensaver that is inspired by The Office.
 
 You know the episode... everyone stops work, waiting for the screensaver logo to hit the corner because they don't know what to expect.
 
-<video src="https://github.com/user-attachments/assets/e8f2e92e-81eb-47fd-8d3b-5408de9a76ec" controls width="100%" playsinline></video>
+![The Peloton mark hits a corner, bursts, and starts again](downloads/the_office.gif)
