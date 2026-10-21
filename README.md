@@ -85,7 +85,10 @@ These are notes from exercising this software on that one Android 10 Tread. They
 
 **Behavior worth knowing**
 
-- After the belt has moved once, TIME keeps counting until you stop the workout and tap Close, including while the belt is stopped. Pause freezes time and distance and leaves the belt running. I'm sure sets the belt to 0 mph. Close clears the numbers on the bar and does not change the belt. The safety key still stops the belt.
+- After the belt has moved once, TIME keeps counting while the belt is stopped. It freezes when you tap the pause button, or when you tap "I'm sure" to confirm on the stop modal. Miles count only while the belt is moving, and they freeze at the same time.
+- The pause button leaves the belt running and pauses a show that is playing. Tap the play button on the bar and TIME starts again. Miles pick up only while the belt is moving. The show stays paused, and the belt stays as it is.
+- "I'm sure" is the confirmation on the stop modal. It freezes those numbers, sets the belt to 0 mph, and shows the summary. Close clears the numbers and leaves the belt at 0 mph. The safety key still stops the belt on its own.
+- The screensaver starts after a minute of no use and no touch, or when you tap the sleep button. Hold that button for the corner burst. While it is up, the metrics bar and the bottom row are hidden. TIME keeps counting, and the belt is unchanged. Tap the screen to bring the Watch view back.
 - Leave a few hundred megabytes free on `/data`. Filling the tablet makes installs fail.
 
 ## Put it back
@@ -112,3 +115,11 @@ This is not legal advice. Peloton's "Try a workout or Just Run" button is their 
 This project is not affiliated with, endorsed by, or supported by Peloton Interactive, Inc. "Peloton" is their trademark. This repository does not contain Peloton's software, Peloton's firmware, or a copy of their operating system.
 
 The same caution the Bike projects use applies here, with one difference. Those projects often replace the operating system. This one does not. It is an app, a home-screen setting, and three disabled user-interface packages, all reversible. That difference does not make it safe, legal for you, or supported. Treat it as an experiment. If you are unsure, do not run it.
+
+## Easter Egg Fun
+
+There's an Easter egg in the sleep screensaver that is inspired by The Office.
+
+You know the episode... everyone stops work, waiting for the screensaver logo to hit the corner because they don't know what to expect.
+
+<video src="https://github.com/MichaelCyger/Peloton-Tread/releases/download/the-office/the_office.mp4" controls width="100%" playsinline></video>
