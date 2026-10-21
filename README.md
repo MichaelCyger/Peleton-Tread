@@ -1,4 +1,4 @@
-# Peleton Tread
+# Peloton Tread
 
 Experimental software for a Peloton Tread you already own. No warranty. Not affiliated with Peloton. Not legal advice. Details are in [Read this before you use it](#read-this-before-you-use-it).
 
@@ -51,7 +51,7 @@ The notes below are from one original Peloton Tread, 2021, Android 10, arm64, 19
 
 ## Hand this to an assistant
 
-This repository is public. If you have a computer, a data USB-C cable, and an assistant such as Cursor, point the assistant at [github.com/MichaelCyger/Peleton-Tread](https://github.com/MichaelCyger/Peleton-Tread). A Mac or a PC both work. The assistant can read the instructions from that address, or you can clone the folder and open it.
+This repository is public. If you have a computer, a data USB-C cable, and an assistant such as Cursor, point the assistant at [github.com/MichaelCyger/Peloton-Tread](https://github.com/MichaelCyger/Peloton-Tread). A Mac or a PC both work. The assistant can read the instructions from that address, or you can clone the folder and open it.
 
 1. Plug the Tread into the computer with the data cable.
 2. Tell the assistant to open this repository, or open the cloned folder yourself (File → Open Folder).
