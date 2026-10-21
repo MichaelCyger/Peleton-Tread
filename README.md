@@ -16,7 +16,7 @@ You do not get Peloton classes, and this does not install a new operating system
 
 The steps are in this repository. The reason I wanted them is here: [I Bought a Peloton for the Screen. Then I Watched TV on an iPad.](https://mi.ke/tread/)
 
-That post is about the treadmill, the long belt, the screen, and why an iPad ended up on the tray. This repository is the part you can hand to an assistant. Each one links to the other, so you can start with the story or start with the setup.
+That post is about buying what I thought was the best treadmill, the long belt, the screen that could not play a show, and the iPad I hung on it. This repository is the part you can hand to an assistant. Each one links to the other, so you can start with the story or start with the setup.
 
 ## The issue
 
