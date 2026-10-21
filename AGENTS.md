@@ -9,8 +9,8 @@ The owner should be able to hand you this folder, a computer, and a USB-C data c
 On an original Peloton Tread running Android 10:
 
 - Install `com.treadcover` (source in `app/`).
-- Make `com.treadcover/.HomeActivity` the Home screen. It shows a "Watch" grid of launchable apps.
-- Run `CoverService`, a bottom bar with MPH, INCLINE, PACE, MILES, and TIME at the same text size, plus RESET and a minimize chevron.
+- Make `com.treadcover/.HomeActivity` the Home screen. It shows a "Watch" grid of launchable apps, with a faint Peloton mark in the upper right behind the tiles, and a small sleep button in that corner. After a minute with no touch, or a tap on that button, a screensaver keeps the display on: the mark spins once every two seconds and bounces the full screen. The metrics bar and the bottom controls hide while it runs. A corner hit bursts it into confetti for five seconds, then it starts again from the center on a new heading. Holding the sleep button plays that burst immediately. A tap brings the grid back.
+- Run `CoverService`, a bottom bar with INCLINE, PACE, TIME, MILES, and MPH at the same text size and the same label color, plus pause, stop, and a minimize chevron. Minimized, the pill shows miles, not speed. Pause freezes time and distance and does not stop the belt. Stop asks first. I'm sure sets the belt to 0 mph, then shows a summary. Close on that summary clears the numbers and does not change the belt.
 - Leave the belt controller, person-present stop, and hardware safety key alone.
 - Keep the speed and incline knobs working.
 - Be able to undo it with `app/revert.sh`.
@@ -23,7 +23,7 @@ Never do any of these, even if the owner asks for "the same thing the Bike peopl
 - Do not disable, uninstall, or replace `com.onepeloton.affernetservice`. That process is the belt controller. Person-present auto-stop and the hardware safety key live there.
 - Do not change `ENABLE_PERSON_PRESENT`. The app calls it with `1` (on). Do not pass `0`.
 - Do not add new binder transaction codes, and do not probe the controller by guessing codes. If the existing calls fail, stop and tell the owner. The belt is not a device to fuzz.
-- Do not call `SET_SPEED` or `SET_INCLINE` except through the knob handler already in `TreadController`. Do not raise speed from a script.
+- Do not call `SET_SPEED` or `SET_INCLINE` except through the knob handler or `stopBelt()` in `TreadController`. `stopBelt()` may only write speed 0. Do not raise speed from software.
 - Do not factory-reset the tablet.
 - Do not commit `app/debug.keystore`, `app/build/`, `app/device-state/`, any APK, or a PIN. The PIN is entered on the tablet and stored only in the app's private prefs (or, if the owner sets it that way, the `treadcover_pin` global setting). Never copy a PIN into the repo, a commit, or a screenshot you add here.
 - Do not put the tablet serial number in the repo.
@@ -128,9 +128,10 @@ The reference tablet reports `android.hardware.bluetooth` and `android.hardware.
 
 ## Known behavior
 
-- TIME keeps counting after the belt stops, until RESET. That comes from `TreadController.sample`: once `firstMoveMs` is set, elapsed is `now - firstMoveMs` even at 0 mph. Do not "fix" it unless the owner asks. RESET (`resetSession`) clears miles and the timer only.
-- The MPH label stays green. The numbers are all 30sp and the columns have equal weight. Do not make MPH larger again unless the owner asks.
+- TIME keeps counting after the belt stops, until the workout summary is closed, unless Pause is on. Once `firstMoveMs` is set, elapsed is `now - firstMoveMs` even at 0 mph. Do not change that unless the owner asks. Pause and stop stay inactive until that clock is running. While a workout is paused, those buttons stay active: play resumes the clock, and stop still ends the workout. Pause freezes elapsed time and miles and does not change belt speed. That same press sends a media-pause key to a show that is playing. Play resumes the clock only, not the show. I'm sure calls `stopBelt()`, which sets the speed target to 0 and nothing else. Close on the summary (`resetSession`) clears miles and the timer only.
+- Labels are one color. Do not turn MPH green or make it larger. The numbers are all 30sp and the columns have equal weight. Order is INCLINE, PACE, TIME, MILES, MPH. The minimized pill shows miles.
 - The bar is not focusable, so it does not take key events away from the app underneath. Keep it that way.
+- The Watch screensaver starts after 60 seconds without a touch, or when the sleep button is tapped. Holding that button plays the corner burst. While it is up, the metrics bar is hidden and the Watch window is marked with Peloton's own window flag so the tablet hides the bottom row. The mark can travel that area. Clear the flag when the screensaver stops so the row comes back. It does not change the belt. A real corner is both edges in the same frame. The hold is the only shortcut.
 - `app/build.sh` creates `app/debug.keystore` on first build (store password `android`, alias `androiddebugkey`). A later install onto the same tablet must be signed with that same key, or `adb install -r` fails with a signature mismatch. Uninstall first if the key is gone. Do not commit the keystore.
 
 ## Undo
@@ -160,6 +161,6 @@ adb uninstall com.google.android.apps.youtube.unplugged
 
 ## If you are about to edit the code
 
-Keep the safety comments in `TreadController` true. The overlay stays read-only except RESET (clears the session numbers) and the minimize chevron. Knob steps stay 0.1 mph and 0.5% incline. Do not add a software "start the belt" button.
+Keep the safety comments in `TreadController` true. The overlay stays read-only except pause, stop, and the minimize chevron. I'm sure may only set belt speed to 0. Close on the summary clears the session numbers and does not change the belt. Knob steps stay 0.1 mph and 0.5% incline. Do not add a software button that starts the belt or raises speed.
 
 After a UI change, build, `adb install -r`, and confirm with a screenshot of Watch and of one streaming app that the bar is visible and the show still receives taps. Then ask the owner to confirm the safety key still stops the belt.

@@ -15,7 +15,7 @@ import android.util.Log;
 /**
  * Client for the Peloton tread controller (affernet ITreadInterface).
  * Reads metrics for the HUD, keeps Tread Lock cleared, and relays physical knob turns
- * to setSpeed/setIncline (Peloton's app used to do this; we replace that role).
+ * into speed and incline changes. stopBelt() is the only other speed write, and it sets 0.
  * Person-present auto-stop and the hardware safety key stay in the controller firmware.
  */
 public final class TreadController {
@@ -72,6 +72,9 @@ public final class TreadController {
     private long firstMoveMs;
     private long lastSampleMs;
     private double miles;
+    private boolean metricsPaused;
+    private long pausedElapsedMs;
+    private int sessionEpoch;
 
     private TreadCallback callback;
     private boolean ownerRegistered;
@@ -151,23 +154,63 @@ public final class TreadController {
         double inclinePercent = inclineTenths / 10.0;
 
         long now = SystemClock.elapsedRealtime();
-        if (speedMph > 0.05) {
-            if (firstMoveMs == 0) {
-                firstMoveMs = now;
-                lastSampleMs = now;
+        if (!metricsPaused) {
+            if (speedMph > 0.05) {
+                if (firstMoveMs == 0) {
+                    firstMoveMs = now;
+                    lastSampleMs = now;
+                }
+                double hours = (now - lastSampleMs) / 3600000.0;
+                miles += speedMph * hours;
             }
-            double hours = (now - lastSampleMs) / 3600000.0;
-            miles += speedMph * hours;
+            lastSampleMs = now;
         }
-        lastSampleMs = now;
 
-        String elapsed = firstMoveMs == 0 ? "" : formatElapsed(now - firstMoveMs);
+        String elapsed;
+        if (metricsPaused) {
+            elapsed = pausedElapsedMs == 0 && firstMoveMs == 0 ? "" : formatElapsed(pausedElapsedMs);
+        } else {
+            elapsed = firstMoveMs == 0 ? "" : formatElapsed(now - firstMoveMs);
+        }
 
         final double fSpeed = speedMph;
         final double fIncline = inclinePercent;
         final double fMiles = miles;
         final String fElapsed = elapsed;
-        handler.post(() -> listener.onTread(fSpeed, fIncline, fMiles, fElapsed));
+        final int epoch = sessionEpoch;
+        handler.post(() -> {
+            if (epoch != sessionEpoch) {
+                return;
+            }
+            listener.onTread(fSpeed, fIncline, fMiles, fElapsed);
+        });
+    }
+
+    /** Freeze distance and elapsed time. Does not change belt speed. */
+    public void pauseMetrics() {
+        if (metricsPaused) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        pausedElapsedMs = firstMoveMs == 0 ? 0 : now - firstMoveMs;
+        metricsPaused = true;
+    }
+
+    /** Continue distance and elapsed time from the frozen values. Does not change belt speed. */
+    public void resumeMetrics() {
+        if (!metricsPaused) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (firstMoveMs != 0 || pausedElapsedMs > 0) {
+            firstMoveMs = now - pausedElapsedMs;
+        }
+        lastSampleMs = now;
+        metricsPaused = false;
+    }
+
+    public boolean isMetricsPaused() {
+        return metricsPaused;
     }
 
     /** Zero the HUD's distance and time without touching the belt. */
@@ -175,6 +218,9 @@ public final class TreadController {
         miles = 0;
         firstMoveMs = 0;
         lastSampleMs = 0;
+        metricsPaused = false;
+        pausedElapsedMs = 0;
+        sessionEpoch++;
     }
 
     public boolean isUnlocked() {
@@ -333,6 +379,12 @@ public final class TreadController {
     private void nudgeSpeed(int deltaTenths) {
         targetSpeedTenths = clamp(targetSpeedTenths + deltaTenths, 0, maxSpeedTenths);
         call(SET_SPEED, targetSpeedTenths);
+    }
+
+    /** Command 0 mph. Does not change incline, person-present, or the safety key. */
+    public void stopBelt() {
+        targetSpeedTenths = 0;
+        call(SET_SPEED, 0);
     }
 
     private void nudgeIncline(int deltaTenths) {

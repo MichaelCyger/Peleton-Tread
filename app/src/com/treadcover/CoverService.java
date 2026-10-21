@@ -5,15 +5,25 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
+import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -31,22 +41,40 @@ public final class CoverService extends Service implements TreadController.Liste
     private WindowManager.LayoutParams overlayParams;
     private View expandedBar;
     private View collapsedPill;
-    private TextView pillSpeed;
+    private TextView pillMiles;
     private TextView speedView;
     private TextView inclineView;
     private TextView paceView;
     private TextView distanceView;
     private TextView timeView;
+    private PauseGlyph pauseIcon;
+    private View pauseButton;
+    private View stopButton;
+    private boolean workoutControlsOn;
+    private boolean workoutControlsSet;
+    private View modalScrim;
     private TreadController tread;
     private View pinPad;
     private TextView pinDots;
     private TextView pinError;
     private final StringBuilder pinEntry = new StringBuilder();
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private static CoverService active;
+    private static boolean metricsHidden;
+
+    /** Hide the metrics bar while the Watch screensaver is up. */
+    public static void setMetricsHidden(boolean hidden) {
+        metricsHidden = hidden;
+        CoverService service = active;
+        if (service != null) {
+            service.applyMetricsHidden();
+        }
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        active = this;
         startForeground(NOTIFICATION_ID, notification());
         windows = (WindowManager) getSystemService(WINDOW_SERVICE);
         showCover();
@@ -61,10 +89,14 @@ public final class CoverService extends Service implements TreadController.Liste
 
     @Override
     public void onDestroy() {
+        if (active == this) {
+            active = null;
+        }
         if (tread != null) {
             tread.stop();
         }
         dismissPinPad();
+        dismissModal();
         if (overlay != null) {
             windows.removeView(overlay);
             overlay = null;
@@ -104,7 +136,11 @@ public final class CoverService extends Service implements TreadController.Liste
         }
         distanceView.setText(String.format("%.2f", miles));
         timeView.setText(elapsed == null || elapsed.length() == 0 ? "0:00" : elapsed);
-        pillSpeed.setText(String.format("%.1f", speed));
+        pillMiles.setText(String.format("%.2f", miles));
+        boolean clockRunning = elapsed != null && elapsed.length() > 0
+                && (tread == null || !tread.isMetricsPaused());
+        boolean paused = tread != null && tread.isMetricsPaused();
+        setWorkoutControls(clockRunning || paused);
     }
 
     private static final int BAR_BG = Color.argb(236, 9, 11, 15);
@@ -127,26 +163,31 @@ public final class CoverService extends Service implements TreadController.Liste
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(28), dp(12), dp(16), dp(12));
 
-        speedView = metric("0.0", 30);
-        row.addView(metricColumn("MPH", speedView, true), weight(1f));
-
-        row.addView(divider());
         inclineView = metric("0.0%", 30);
-        row.addView(metricColumn("INCLINE", inclineView, false), weight(1f));
+        row.addView(metricColumn("INCLINE", inclineView), weight(1f));
 
         row.addView(divider());
         paceView = metric("—", 30);
-        row.addView(metricColumn("PACE", paceView, false), weight(1f));
-
-        row.addView(divider());
-        distanceView = metric("0.00", 30);
-        row.addView(metricColumn("MILES", distanceView, false), weight(1f));
+        row.addView(metricColumn("PACE", paceView), weight(1f));
 
         row.addView(divider());
         timeView = metric("0:00", 30);
-        row.addView(metricColumn("TIME", timeView, false), weight(1f));
+        row.addView(metricColumn("TIME", timeView), weight(1f));
 
-        row.addView(iconButton("RESET", false, v -> showResetConfirm()));
+        row.addView(divider());
+        distanceView = metric("0.00", 30);
+        row.addView(metricColumn("MILES", distanceView), weight(1f));
+
+        row.addView(divider());
+        speedView = metric("0.0", 30);
+        row.addView(metricColumn("MPH", speedView), weight(1f));
+
+        pauseIcon = new PauseGlyph(this);
+        pauseButton = symbolButton(pauseIcon, v -> onPauseClicked());
+        stopButton = symbolButton(new StopGlyph(this), v -> showStopConfirm());
+        row.addView(pauseButton);
+        row.addView(stopButton);
+        setWorkoutControls(false);
         row.addView(iconButton("\u25BC", true, v -> setCollapsed(true)));
 
         bar.addView(row);
@@ -160,9 +201,9 @@ public final class CoverService extends Service implements TreadController.Liste
         pill.setGravity(Gravity.CENTER_VERTICAL);
         pill.setBackgroundColor(BAR_BG);
         pill.setPadding(dp(18), dp(10), dp(18), dp(10));
-        pillSpeed = metric("0.0", 24);
-        pill.addView(pillSpeed);
-        TextView pillUnit = label("  MPH   \u25B2");
+        pillMiles = metric("0.00", 24);
+        pill.addView(pillMiles);
+        TextView pillUnit = label("  MILES   \u25B2");
         pill.addView(pillUnit);
         pill.setOnClickListener(v -> setCollapsed(false));
         pill.setVisibility(View.GONE);
@@ -188,6 +229,20 @@ public final class CoverService extends Service implements TreadController.Liste
         windows.addView(root, params);
         overlay = root;
         overlayParams = params;
+        applyMetricsHidden();
+    }
+
+    private void applyMetricsHidden() {
+        int vis = metricsHidden ? View.GONE : View.VISIBLE;
+        if (overlay != null) {
+            overlay.setVisibility(vis);
+        }
+        if (modalScrim != null) {
+            modalScrim.setVisibility(vis);
+        }
+        if (pinPad != null) {
+            pinPad.setVisibility(vis);
+        }
     }
 
     private LinearLayout.LayoutParams weight(float w) {
@@ -203,21 +258,18 @@ public final class CoverService extends Service implements TreadController.Liste
         return line;
     }
 
-    private LinearLayout metricColumn(String title, TextView value, boolean hero) {
+    private LinearLayout metricColumn(String title, TextView value) {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER_HORIZONTAL);
         TextView lbl = label(title);
         lbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        if (hero) {
-            lbl.setTextColor(ACCENT);
-        }
         col.addView(lbl);
         col.addView(value);
         return col;
     }
 
-    /** Subtle right-side button for RESET and the minimize chevron. */
+    /** Subtle minimize chevron. Pause and stop are separate filled buttons. */
     private Button iconButton(String text, boolean chevron, View.OnClickListener listener) {
         Button button = new Button(this);
         button.setText(text);
@@ -247,55 +299,307 @@ public final class CoverService extends Service implements TreadController.Liste
         windows.updateViewLayout(overlay, overlayParams);
     }
 
-    private void showResetConfirm() {
-        final LinearLayout scrim = new LinearLayout(this);
-        scrim.setOrientation(LinearLayout.VERTICAL);
-        scrim.setGravity(Gravity.CENTER);
-        scrim.setBackgroundColor(Color.argb(205, 0, 0, 0));
+    /** Filled, rounded control so pause and stop read as buttons, not labels. */
+    private FrameLayout symbolButton(View icon, View.OnClickListener listener) {
+        FrameLayout button = new FrameLayout(this);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.rgb(48, 56, 68));
+        bg.setCornerRadius(dp(14));
+        button.setBackground(bg);
+        button.setElevation(dp(3));
+        button.addView(icon, new FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER));
+        button.setOnClickListener(listener);
+        button.setOnTouchListener((v, event) -> {
+            if (!v.isEnabled()) {
+                return true;
+            }
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                v.setAlpha(0.6f);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                v.setAlpha(1f);
+            }
+            return false;
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(58), dp(58));
+        lp.gravity = Gravity.CENTER_VERTICAL;
+        lp.setMargins(dp(8), 0, 0, 0);
+        button.setLayoutParams(lp);
+        return button;
+    }
 
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER_HORIZONTAL);
-        card.setBackgroundColor(Color.rgb(18, 20, 26));
+    /** Pause and stop do nothing until the clock is running. A paused workout stays tappable so it can resume or end. */
+    private void setWorkoutControls(boolean on) {
+        if (pauseButton == null || stopButton == null) {
+            return;
+        }
+        if (workoutControlsSet && workoutControlsOn == on) {
+            return;
+        }
+        workoutControlsSet = true;
+        workoutControlsOn = on;
+        applyControl(pauseButton, on);
+        applyControl(stopButton, on);
+    }
+
+    private void applyControl(View button, boolean on) {
+        button.setEnabled(on);
+        button.setAlpha(on ? 1f : 0.28f);
+        button.setElevation(on ? dp(3) : 0);
+    }
+
+    private void onPauseClicked() {
+        if (!workoutControlsOn || modalScrim != null) {
+            return;
+        }
+        if (tread != null && tread.isMetricsPaused()) {
+            tread.resumeMetrics();
+            setPausedAppearance(false);
+            return;
+        }
+        if (tread != null) {
+            tread.pauseMetrics();
+        }
+        setPausedAppearance(true);
+        pausePlayingVideo();
+        showPauseModal();
+    }
+
+    /** Pause the show if one is playing. Does not resume it when the clock starts again. */
+    private void pausePlayingVideo() {
+        AudioManager audio = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (audio == null) {
+            return;
+        }
+        long now = SystemClock.uptimeMillis();
+        audio.dispatchMediaKeyEvent(new KeyEvent(
+                now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE, 0));
+        audio.dispatchMediaKeyEvent(new KeyEvent(
+                now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE, 0));
+        Log.i("CoverService", "media pause");
+    }
+
+    private void setPausedAppearance(boolean paused) {
+        if (pauseIcon != null) {
+            pauseIcon.setShowPlay(paused);
+        }
+    }
+
+    private void showPauseModal() {
+        LinearLayout scrim = modalScrim();
+        LinearLayout card = modalCard();
+        card.setMinimumWidth(dp(680));
+        card.setPadding(dp(48), dp(40), dp(48), dp(32));
+
+        PauseGlyph glyph = new PauseGlyph(this);
+        LinearLayout.LayoutParams glyphLp = new LinearLayout.LayoutParams(dp(84), dp(84));
+        glyphLp.gravity = Gravity.CENTER_HORIZONTAL;
+        card.addView(glyph, glyphLp);
+
+        TextView message = new TextView(this);
+        message.setText("Time and distance paused");
+        message.setTextColor(Color.WHITE);
+        message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        message.setGravity(Gravity.CENTER);
+        message.setPadding(0, dp(22), 0, dp(8));
+        card.addView(message, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout note = new LinearLayout(this);
+        note.setOrientation(LinearLayout.HORIZONTAL);
+        note.setGravity(Gravity.CENTER_VERTICAL);
+        note.addView(pauseNote("Belt runs, click "));
+        PauseGlyph play = new PauseGlyph(this);
+        play.setShowPlay(true);
+        LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        playLp.setMargins(dp(2), 0, dp(2), 0);
+        note.addView(play, playLp);
+        note.addView(pauseNote(" to resume"));
+        LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        noteLp.gravity = Gravity.CENTER_HORIZONTAL;
+        noteLp.bottomMargin = dp(28);
+        card.addView(note, noteLp);
+
+        Button ok = pillButton("OK", Color.rgb(44, 50, 60), Color.WHITE);
+        ok.setOnClickListener(v -> dismissModal());
+        card.addView(ok);
+
+        scrim.addView(card, cardParams());
+        presentModal(scrim);
+    }
+
+    private TextView pauseNote(String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextColor(Color.rgb(150, 158, 168));
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        view.setIncludeFontPadding(false);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        return view;
+    }
+
+    private void showStopConfirm() {
+        if (!workoutControlsOn || modalScrim != null) {
+            return;
+        }
+        LinearLayout scrim = modalScrim();
+        LinearLayout card = modalCard();
+        card.setMinimumWidth(dp(560));
         card.setPadding(dp(44), dp(32), dp(44), dp(28));
 
         TextView title = new TextView(this);
-        title.setText("Reset distance & time?");
+        title.setText("Stop this workout?");
         title.setTextColor(Color.WHITE);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
-        title.setGravity(Gravity.CENTER_HORIZONTAL);
-        card.addView(title);
+        title.setGravity(Gravity.CENTER);
+        card.addView(title, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         TextView sub = new TextView(this);
         sub.setText("Are you sure?");
         sub.setTextColor(Color.rgb(150, 158, 168));
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        sub.setGravity(Gravity.CENTER_HORIZONTAL);
+        sub.setGravity(Gravity.CENTER);
         sub.setPadding(0, dp(8), 0, dp(24));
-        card.addView(sub);
+        card.addView(sub, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         buttons.setGravity(Gravity.CENTER);
 
         Button cancel = pillButton("Cancel", Color.rgb(44, 50, 60), Color.WHITE);
-        cancel.setOnClickListener(v -> windows.removeView(scrim));
+        cancel.setOnClickListener(v -> dismissModal());
         buttons.addView(cancel);
 
-        Button reset = pillButton("Reset", ACCENT, Color.rgb(8, 14, 12));
-        reset.setOnClickListener(v -> {
+        Button sure = pillButton("I'm sure", ACCENT, Color.rgb(8, 14, 12));
+        sure.setOnClickListener(v -> {
+            String incline = inclineView.getText().toString();
+            String mph = speedView.getText().toString();
+            String pace = paceView.getText().toString();
+            String time = timeView.getText().toString();
+            String miles = distanceView.getText().toString();
             if (tread != null) {
-                tread.resetSession();
+                tread.pauseMetrics();
+                tread.stopBelt();
             }
-            distanceView.setText("0.00");
-            timeView.setText("0:00");
-            windows.removeView(scrim);
+            showSummary(incline, mph, pace, time, miles);
         });
-        buttons.addView(reset);
+        buttons.addView(sure);
 
         card.addView(buttons);
         scrim.addView(card, cardParams());
+        presentModal(scrim);
+    }
 
+    private void showSummary(String incline, String mph, String pace, String time, String miles) {
+        LinearLayout scrim = modalScrim();
+        LinearLayout card = modalCard();
+        card.setMinimumWidth(dp(680));
+
+        View accent = new View(this);
+        accent.setBackgroundColor(ACCENT);
+        card.addView(accent, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(3)));
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setGravity(Gravity.CENTER_HORIZONTAL);
+        body.setPadding(dp(40), dp(28), dp(40), dp(32));
+
+        TextView heading = new TextView(this);
+        heading.setText("WORKOUT");
+        heading.setTextColor(Color.rgb(150, 158, 168));
+        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        heading.setLetterSpacing(0.28f);
+        heading.setGravity(Gravity.CENTER_HORIZONTAL);
+        heading.setPadding(0, 0, 0, dp(18));
+        body.addView(heading);
+
+        LinearLayout heroes = new LinearLayout(this);
+        heroes.setOrientation(LinearLayout.HORIZONTAL);
+        heroes.setGravity(Gravity.CENTER);
+        heroes.addView(summaryFigure(miles, "MILES", 56), weight(1f));
+        heroes.addView(summaryFigure(time, "TIME", 56), weight(1f));
+        body.addView(heroes, new LinearLayout.LayoutParams(dp(600), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        View rule = new View(this);
+        rule.setBackgroundColor(Color.argb(40, 255, 255, 255));
+        LinearLayout.LayoutParams ruleLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+        ruleLp.setMargins(dp(8), dp(22), dp(8), dp(18));
+        body.addView(rule, ruleLp);
+
+        LinearLayout details = new LinearLayout(this);
+        details.setOrientation(LinearLayout.HORIZONTAL);
+        details.setGravity(Gravity.CENTER);
+        details.addView(summaryFigure(incline, "INCLINE", 28), weight(1f));
+        details.addView(summaryFigure(mph, "MPH", 28), weight(1f));
+        details.addView(summaryFigure(pace, "PACE", 28), weight(1f));
+        body.addView(details, new LinearLayout.LayoutParams(dp(600), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        Button close = pillButton("Close", ACCENT, Color.rgb(8, 14, 12));
+        close.setMinWidth(dp(220));
+        close.setOnClickListener(v -> finishWorkout());
+        LinearLayout.LayoutParams closeLp = (LinearLayout.LayoutParams) close.getLayoutParams();
+        closeLp.topMargin = dp(28);
+        closeLp.gravity = Gravity.CENTER_HORIZONTAL;
+        body.addView(close);
+
+        card.addView(body, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        scrim.addView(card, cardParams());
+        presentModal(scrim);
+    }
+
+    private LinearLayout summaryFigure(String value, String title, int sp) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setPadding(dp(8), 0, dp(8), 0);
+        col.addView(metric(value, sp));
+        TextView lbl = label(title);
+        lbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        lbl.setPadding(0, dp(6), 0, 0);
+        col.addView(lbl);
+        return col;
+    }
+
+    private void finishWorkout() {
+        if (tread != null) {
+            tread.resetSession();
+        }
+        distanceView.setText("0.00");
+        timeView.setText("0:00");
+        pillMiles.setText("0.00");
+        setPausedAppearance(false);
+        setWorkoutControls(false);
+        dismissModal();
+    }
+
+    private LinearLayout modalScrim() {
+        LinearLayout scrim = new LinearLayout(this);
+        scrim.setOrientation(LinearLayout.VERTICAL);
+        scrim.setGravity(Gravity.CENTER);
+        scrim.setBackgroundColor(Color.argb(205, 0, 0, 0));
+        return scrim;
+    }
+
+    private LinearLayout modalCard() {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER_HORIZONTAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.rgb(16, 18, 24));
+        bg.setCornerRadius(dp(22));
+        card.setBackground(bg);
+        card.setClipToOutline(true);
+        return card;
+    }
+
+    private void presentModal(View scrim) {
+        dismissModal();
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
@@ -308,6 +612,18 @@ public final class CoverService extends Service implements TreadController.Liste
                         | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT);
         windows.addView(scrim, params);
+        modalScrim = scrim;
+    }
+
+    private void dismissModal() {
+        if (modalScrim == null) {
+            return;
+        }
+        try {
+            windows.removeView(modalScrim);
+        } catch (IllegalArgumentException ignored) {
+        }
+        modalScrim = null;
     }
 
     /** Centered, content-sized card (vertical LinearLayout would otherwise stretch it full width). */
@@ -520,5 +836,76 @@ public final class CoverService extends Service implements TreadController.Liste
                 .setSmallIcon(android.R.drawable.ic_media_play)
                 .setOngoing(true)
                 .build();
+    }
+
+    /** Two bars, or a play triangle once time and distance are paused. */
+    private static final class PauseGlyph extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean showPlay;
+
+        PauseGlyph(Context context) {
+            super(context);
+            paint.setColor(Color.WHITE);
+        }
+
+        void setShowPlay(boolean showPlay) {
+            this.showPlay = showPlay;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            if (showPlay) {
+                Path path = new Path();
+                float inset = w * 0.16f;
+                path.moveTo(inset, h * 0.1f);
+                path.lineTo(w - inset * 0.35f, h / 2f);
+                path.lineTo(inset, h * 0.9f);
+                path.close();
+                canvas.drawPath(path, paint);
+                return;
+            }
+            float barW = w * 0.28f;
+            float gap = w * 0.16f;
+            float left = (w - barW * 2f - gap) / 2f;
+            float top = h * 0.06f;
+            float bottom = h * 0.94f;
+            float radius = barW / 4f;
+            canvas.drawRoundRect(left, top, left + barW, bottom, radius, radius, paint);
+            float second = left + barW + gap;
+            canvas.drawRoundRect(second, top, second + barW, bottom, radius, radius, paint);
+        }
+    }
+
+    /** Red octagon. The belt is not stopped; this ends the counted workout. */
+    private static final class StopGlyph extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        StopGlyph(Context context) {
+            super(context);
+            paint.setColor(Color.rgb(214, 59, 59));
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            float cx = getWidth() / 2f;
+            float cy = getHeight() / 2f;
+            float rad = Math.min(getWidth(), getHeight()) / 2f;
+            Path path = new Path();
+            for (int i = 0; i < 8; i++) {
+                double angle = Math.toRadians(-90 + 22.5 + i * 45.0);
+                float x = cx + (float) (Math.cos(angle) * rad);
+                float y = cy + (float) (Math.sin(angle) * rad);
+                if (i == 0) {
+                    path.moveTo(x, y);
+                } else {
+                    path.lineTo(x, y);
+                }
+            }
+            path.close();
+            canvas.drawPath(path, paint);
+        }
     }
 }

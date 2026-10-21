@@ -6,7 +6,7 @@ Experimental software for a Peloton Tread you already own. No warranty. Not affi
 
 The Peloton Tread is an awesome treadmill, and it has the largest screen in the industry. That screen is a perfect place to watch a show while you walk or run. You can't use it that way by default. The tablet opens on a welcome page that is almost entirely a pitch to activate a membership and take Peloton classes.
 
-This setup is for an owner who does not want those classes or that membership, and just wants to be entertained. You get a home screen called **Watch** that opens the streaming apps installed on the treadmill, and a bar along the bottom with speed, incline, pace, miles, and time while a show is playing.
+This setup is for an owner who does not want those classes or that membership, and just wants to be entertained. You get a home screen called **Watch** that opens the streaming apps installed on the treadmill, and a bar along the bottom with incline, pace, time, miles, and speed while a show is playing. Minimized, that bar shows miles. A small sleep button in the upper right of Watch starts a screensaver, and so does leaving Watch alone for a minute. The bar and the bottom controls hide, and a spinning Peloton mark bounces the full screen. If it lands in a corner, it bursts into confetti, then starts again from the center. Hold the sleep button to see that burst. Tap to bring the apps back.
 
 The belt, the speed and incline knobs, and the red safety key stay Peloton's. The passcode pad, the sign-in nags, and that welcome screen come off. `app/revert.sh` puts those Peloton screens back.
 
@@ -34,7 +34,7 @@ This project installs a separate app, makes that app the Home screen, and turns 
 
 ![Watch: a grid of streaming apps and a metrics bar](images/Peloton_Watch.png)
 
-*Example of the Watch screen. The five numbers on the bar are the same size. RESET clears the distance and the timer on the bar. It does not stop the belt.*
+*Example of the Watch screen. The five numbers on the bar are the same size. Pause freezes time and distance and leaves the belt running. I'm sure stops the belt, then Close clears the bar.*
 
 ![A streaming app with the same metrics bar along the bottom](images/Peloton_Streaming.png)
 
@@ -72,7 +72,7 @@ These are notes from exercising this software on that one Android 10 Tread. They
 **Held up**
 
 - Watch lists the apps already installed on the tablet (on that machine: Apple TV, Disney+, HBO Max, Netflix, Peacock, Prime Video, Settings) and launches them.
-- The metrics bar reads speed, incline, pace, miles, and time. All five numbers are the same size. The bar sits on top of a show and does not steal clicks from the show.
+- The metrics bar reads incline, pace, time, miles, and speed, in that order. Speed is on the right. All five numbers are the same size, and the labels are the same color. Minimized, the pill shows miles. Pause freezes time and distance and leaves the belt running. I'm sure stops the belt and shows a summary. Close clears the bar. The bar sits on top of a show and does not steal clicks from the show.
 - The physical speed knob and incline knob still change the belt, in the same 0.1 mph and 0.5% steps as Just Run.
 - The passcode is requested once. After that the app remembers it on the tablet and clears Tread Lock itself, including after a reboot. The safety key is a separate mechanism and is not part of that.
 - Turning the three Peloton UI packages back on with `app/revert.sh`, then rebooting, restores Peloton's chrome.
@@ -85,7 +85,7 @@ These are notes from exercising this software on that one Android 10 Tread. They
 
 **Behavior worth knowing**
 
-- After the belt has moved once, TIME keeps counting until you press RESET, including while the belt is stopped. RESET clears the numbers on the bar. It does not stop the belt. The safety key stops the belt.
+- After the belt has moved once, TIME keeps counting until you stop the workout and tap Close, including while the belt is stopped. Pause freezes time and distance and leaves the belt running. I'm sure sets the belt to 0 mph. Close clears the numbers on the bar and does not change the belt. The safety key still stops the belt.
 - Leave a few hundred megabytes free on `/data`. Filling the tablet makes installs fail.
 
 ## Put it back
