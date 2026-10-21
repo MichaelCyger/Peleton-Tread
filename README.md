@@ -4,21 +4,29 @@ Experimental software for a Peloton Tread you already own. No warranty. Not affi
 
 ## Bottom line
 
-You get a home screen called **Watch** that opens the streaming apps installed on the treadmill, and a bar along the bottom with speed, incline, pace, miles, and time while a show is playing.
+The Peloton Tread is an awesome treadmill, and it has the largest screen in the industry. That screen is a perfect place to watch a show while you walk or run. You can't use it that way by default. The tablet opens on a welcome page that is almost entirely a pitch to activate a membership and take Peloton classes.
 
-The belt, the speed and incline knobs, and the red safety key stay Peloton's. The passcode pad, the sign-in nags, and the welcome screen that is mostly a membership pitch come off. `app/revert.sh` puts those Peloton screens back.
+This setup is for an owner who does not want those classes or that membership, and just wants to be entertained. You get a home screen called **Watch** that opens the streaming apps installed on the treadmill, and a bar along the bottom with speed, incline, pace, miles, and time while a show is playing.
 
-You do not get Peloton classes, a Google account on the tablet, YouTube TV, or a new operating system. This is not the kind of project that replaces the tablet's system software.
+The belt, the speed and incline knobs, and the red safety key stay Peloton's. The passcode pad, the sign-in nags, and that welcome screen come off. `app/revert.sh` puts those Peloton screens back.
+
+You do not get Peloton classes, and this does not install a new operating system.
+
+## Why
+
+The steps are in this repository. The reason I wanted them is here: [I Bought a Peloton for the Screen. Then I Watched TV on an iPad.](https://mi.ke/tread/)
+
+That post is about the treadmill, the long belt, the screen, and why an iPad ended up on the tray. This repository is the part you can hand to an assistant. Each one links to the other, so you can start with the story or start with the setup.
 
 ## The issue
 
-You can use a Peloton treadmill you own without paying for Peloton's All-Access membership. Peloton's own screen says so. On a Tread that was never activated, or whose membership was canceled, the screen offers **Try a workout or Just Run**. That is Peloton's feature. It shows the belt can run without that subscription. It does not mean the machine is completely free of an account, and it does not mean it is a normal offline tablet.
+You can use a Peloton treadmill you own without paying for Peloton's All-Access membership. Peloton's own screen says so. On a Tread that was never activated, or whose membership was canceled, the screen offers **Try a workout or Just Run**. That is Peloton's feature. It shows the belt can run without that subscription. It does not mean the machine is a normal offline tablet, and the welcome page is still a bad fit when the only goal is to watch something and run.
 
-That stock screen is still a bad fit if the only goal is to run and watch a show. A passcode has to be entered, messages about signing in have to be dismissed, and almost the whole welcome screen is a pitch for a service the owner does not want.
+A passcode has to be entered, messages about signing in have to be dismissed, and almost the whole screen is a pitch for a service the owner does not want.
 
-![Stock screen: Activate your Tread, with Try a workout or Just Run in the corner](images/Peloton_Activation.png)
+![Welcome to Peloton: Activate your Tread, with Try a workout or Just Run in the corner](images/Peloton_Activation.jpg)
 
-*Example of that welcome screen. The membership pitch takes the page. "Try a workout or Just Run" is Peloton's own button, tucked in the corner.*
+*The welcome screen. The membership pitch takes the page. "Try a workout or Just Run" is Peloton's own button, tucked in the corner.*
 
 ## What this project puts on the screen
 
@@ -43,12 +51,10 @@ The notes below are from one original Peloton Tread, 2021, Android 10, arm64, 19
 
 ## Hand this to an assistant
 
-A repo is a project folder with a saved history of changes. This one is private: it is not on the public internet. Someone can use it only if you invite them from the repo page.
-
-If you have a computer, a data USB-C cable, and an assistant such as Cursor:
+This repository is public. If you have a computer, a data USB-C cable, and an assistant such as Cursor, point the assistant at [github.com/MichaelCyger/Peleton-Tread](https://github.com/MichaelCyger/Peleton-Tread). A Mac or a PC both work. The assistant can read the instructions from that address, or you can clone the folder and open it.
 
 1. Plug the Tread into the computer with the data cable.
-2. Open this folder in Cursor (File → Open Folder).
+2. Tell the assistant to open this repository, or open the cloned folder yourself (File → Open Folder).
 3. Paste this into the chat:
 
 ```
@@ -74,16 +80,12 @@ These are notes from exercising this software on that one Android 10 Tread. They
 
 **Did not hold up**
 
-- A Google account. The tablet has no Accounts section, and Google Play services will not keep running when it is installed as a normal app on this locked Android build. The process dies on a platform security check (`ActivityManagerService.isSingleton`). Rebooting does not fix it. microG is not an option without signature spoofing, and this build does not have that. Do not root the tablet to chase it.
-- YouTube TV. It opens and sits on a spinner. It needs an account, which this tablet cannot add.
-- The Play Store as a way to install apps. The app can be installed and still cannot sign in or download anything.
-- Signed-in YouTube. Signed-out playback of a public video did work, and only after Google Services Framework was installed and YouTube was installed again afterward so it could read that framework. The first launch took about half a minute, then the video played. An account still could not be added. Play services also logged that it was older than the version YouTube asked for, and the video played anyway. Skip this unless signed-out YouTube is specifically the goal. It uses several hundred megabytes on a tablet whose data partition is about 4 GB.
+- YouTube TV was installed and tried. It opens onto a spinner and never becomes usable. It depends on Google Play services, and this tablet's Android will not keep Play services running. The services process is blocked by the system, and a reboot does not change that. The streaming apps already on the Watch screen, such as Netflix and Prime Video, do not need Play services, and those are the ones that work.
 - Replacing the operating system, unlocking the bootloader, or flashing a different system. This repo does not do that. The tablet above is a locked user build with no root. Projects that talk about doing that to a Peloton Bike are a different project.
 
 **Behavior worth knowing**
 
 - After the belt has moved once, TIME keeps counting until you press RESET, including while the belt is stopped. RESET clears the numbers on the bar. It does not stop the belt. The safety key stops the belt.
-- The first time YouTube is opened after boot, if the extra Google files are present, it waits on Play services and then gives up and plays. Later opens are faster.
 - Leave a few hundred megabytes free on `/data`. Filling the tablet makes installs fail.
 
 ## Put it back
@@ -105,7 +107,7 @@ Uninstalling also deletes the PIN the app stored. Nothing in this repo contains 
 
 This is experimental software. It is published so it can be read and, if you choose, tried on equipment you own. There is no warranty of any kind. It might not work on your Tread. It might leave the screen in a state you have to undo with `app/revert.sh`. It can affect warranty coverage and Peloton's willingness to support or reactivate the machine. You use it at your own risk. The author is not responsible for damage, injury, a lost warranty, or a dispute with Peloton or anyone else.
 
-This is not legal advice, and it is not a statement that any particular person has modified a Peloton product. Peloton's "Try a workout or Just Run" button is their feature, described here because it is on their screen. It is not a ruling about your contract. Your purchase terms, your membership terms, and the law where you live are yours to check. Nothing here tells you to break a law or a contract.
+This is not legal advice. Peloton's "Try a workout or Just Run" button is their feature. It is not a ruling about your contract. Your purchase terms, your membership terms, and the law where you live are yours to check. Nothing here tells you to break a law or a contract.
 
 This project is not affiliated with, endorsed by, or supported by Peloton Interactive, Inc. "Peloton" is their trademark. This repository does not contain Peloton's software, Peloton's firmware, or a copy of their operating system.
 
