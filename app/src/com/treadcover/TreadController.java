@@ -15,7 +15,7 @@ import android.util.Log;
 /**
  * Client for the Peloton tread controller (affernet ITreadInterface).
  * Reads metrics for the HUD, keeps Tread Lock cleared, and relays physical knob turns
- * into speed and incline changes. stopBelt() is the only other speed write, and it sets 0.
+ * into speed and incline changes. stopBelt() is the only other speed write, and it only lowers speed.
  * Person-present auto-stop and the hardware safety key stay in the controller firmware.
  */
 public final class TreadController {
@@ -53,6 +53,11 @@ public final class TreadController {
     private static final int SPEED_STEP_TENTHS = 1;
     private static final int INCLINE_STEP_TENTHS = 5;
 
+    // Confirmed stop. A single SET_SPEED 0 makes the motor board brake hard, so step the
+    // target down the same way the knob does: 0.5 mph every half second, about 1 mph/s.
+    private static final int STOP_STEP_TENTHS = 5;
+    private static final long STOP_STEP_MS = 500L;
+
     // Registering our callback with an approved package string as the cookie makes affernet
     // treat an approved "pin lock owner" as present, which cancels its 5s rogue re-lock timer.
     // That is what keeps Tread Lock from re-engaging mid-run after a one-time unlock.
@@ -83,6 +88,8 @@ public final class TreadController {
     private int maxInclineTenths = 125;
     private int targetSpeedTenths;
     private int targetInclineTenths;
+    private boolean easingStop;
+    private final Runnable easeStop = this::easeOneStep;
     private int lastUnlockResult = Integer.MIN_VALUE;
     private String sessionPin;
 
@@ -153,6 +160,8 @@ public final class TreadController {
         handler.removeCallbacks(poll);
         handler.removeCallbacks(wakeAttempt);
         handler.removeCallbacks(wakeWatchdog);
+        handler.removeCallbacks(easeStop);
+        easingStop = false;
         try {
             context.unbindService(connection);
         } catch (IllegalArgumentException ignored) {
@@ -354,11 +363,11 @@ public final class TreadController {
         if (maxInc > 0) {
             maxInclineTenths = maxInc;
         }
-        int tgtSp = readInt(GET_TARGET_SPEED);
+        int tgtSp = easingStop ? targetSpeedTenths : readInt(GET_TARGET_SPEED);
         int tgtInc = readInt(GET_TARGET_INCLINE);
-        if (tgtSp != Integer.MIN_VALUE && tgtSp >= 0) {
+        if (!easingStop && tgtSp != Integer.MIN_VALUE && tgtSp >= 0) {
             targetSpeedTenths = tgtSp;
-        } else {
+        } else if (!easingStop) {
             int cur = readInt(GET_CURRENT_SPEED);
             targetSpeedTenths = cur == Integer.MIN_VALUE ? 0 : Math.max(0, cur);
         }
@@ -370,7 +379,9 @@ public final class TreadController {
         }
         call(ENABLE_PERSON_PRESENT, 1);
         callVoid(ENABLE_TREAD);
-        call(SET_SPEED, targetSpeedTenths);
+        if (!easingStop) {
+            call(SET_SPEED, targetSpeedTenths);
+        }
         call(SET_INCLINE, targetInclineTenths);
         beltAwake = true;
         Log.i(TAG, "belt ready targets speed=" + targetSpeedTenths + " incline=" + targetInclineTenths);
@@ -450,7 +461,10 @@ public final class TreadController {
         int curSp = readInt(GET_CURRENT_SPEED);
         int curInc = readInt(GET_CURRENT_INCLINE);
         if (curSp != Integer.MIN_VALUE) {
-            targetSpeedTenths = Math.max(0, curSp);
+            int cur = Math.max(0, curSp);
+            if (!easingStop || cur < targetSpeedTenths) {
+                targetSpeedTenths = cur;
+            }
         }
         if (curInc != Integer.MIN_VALUE) {
             targetInclineTenths = Math.max(0, curInc);
@@ -464,6 +478,10 @@ public final class TreadController {
         }
         if (Boolean.TRUE.equals(hwLocked)) {
             Log.i(TAG, "knob event " + eventCode + " ignored: board locked");
+            return;
+        }
+        if (easingStop && eventCode == EVT_LEFT_KNOB_FORWARD) {
+            Log.i(TAG, "knob event " + eventCode + " ignored: slowing to stop");
             return;
         }
         switch (eventCode) {
@@ -489,10 +507,39 @@ public final class TreadController {
         call(SET_SPEED, targetSpeedTenths);
     }
 
-    /** Command 0 mph. Does not change incline, person-present, or the safety key. */
+    /**
+     * Ease the belt to 0 mph after "I'm sure". Steps the target down; never raises it.
+     * Does not change incline, person-present, or the safety key.
+     */
     public void stopBelt() {
-        targetSpeedTenths = 0;
-        call(SET_SPEED, 0);
+        handler.removeCallbacks(easeStop);
+        int current = readInt(GET_CURRENT_SPEED);
+        if (current != Integer.MIN_VALUE && current >= 0 && current < targetSpeedTenths) {
+            targetSpeedTenths = current;
+        }
+        if (targetSpeedTenths < 0) {
+            targetSpeedTenths = 0;
+        }
+        easingStop = targetSpeedTenths > 0;
+        easeOneStep();
+    }
+
+    /** One downward SET_SPEED. Schedules the next until the target is 0. */
+    private void easeOneStep() {
+        if (tread == null) {
+            easingStop = false;
+            return;
+        }
+        int next = targetSpeedTenths <= STOP_STEP_TENTHS ? 0 : targetSpeedTenths - STOP_STEP_TENTHS;
+        targetSpeedTenths = next;
+        call(SET_SPEED, next);
+        Log.i(TAG, "slowing to " + next);
+        if (next > 0) {
+            easingStop = true;
+            handler.postDelayed(easeStop, STOP_STEP_MS);
+        } else {
+            easingStop = false;
+        }
     }
 
     private void nudgeIncline(int deltaTenths) {

@@ -511,7 +511,7 @@ public final class CoverService extends Service implements TreadController.Liste
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         TextView sub = new TextView(this);
-        sub.setText("Are you sure?");
+        sub.setText("The belt will slow to a stop.");
         sub.setTextColor(Color.rgb(150, 158, 168));
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         sub.setGravity(Gravity.CENTER);
