@@ -354,6 +354,20 @@ public final class TreadController {
         Log.i(TAG, "belt ready targets speed=" + targetSpeedTenths + " incline=" + targetInclineTenths);
     }
 
+    /**
+     * Turn the controller back on after the screen has been powered down.
+     * Does not write speed or incline.
+     */
+    public void powerOn() {
+        if (tread == null) {
+            return;
+        }
+        call(ENABLE_PERSON_PRESENT, 1);
+        callVoid(ENABLE_TREAD);
+        beltAwake = true;
+        Log.i(TAG, "power on");
+    }
+
     private void onKnobEvent(int eventCode) {
         if (!beltAwake || tread == null) {
             return;

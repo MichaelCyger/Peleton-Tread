@@ -62,6 +62,14 @@ public final class CoverService extends Service implements TreadController.Liste
     private static CoverService active;
     private static boolean metricsHidden;
 
+    /** Re-enable the belt controller. Does not change speed or incline. */
+    public static void powerController() {
+        CoverService service = active;
+        if (service != null && service.tread != null) {
+            service.tread.powerOn();
+        }
+    }
+
     /** Hide the metrics bar while the Watch screensaver is up. */
     public static void setMetricsHidden(boolean hidden) {
         metricsHidden = hidden;

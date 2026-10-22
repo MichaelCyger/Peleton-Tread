@@ -15,6 +15,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -82,7 +83,9 @@ public final class HomeActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        setTurnScreenOn(true);
         ensureOverlayRunning();
         setContentView(buildUi());
     }
@@ -95,6 +98,7 @@ public final class HomeActivity extends Activity {
         // Rebuild so newly installed apps appear without a restart.
         setContentView(buildUi());
         armSaver();
+        powerWatchOn();
     }
 
     @Override
@@ -121,6 +125,7 @@ public final class HomeActivity extends Activity {
             if (ev.getAction() == MotionEvent.ACTION_DOWN) {
                 screensaver.stop();
                 setWatchChrome(false);
+                powerWatchOn();
                 armSaver();
             }
             return true;
@@ -181,6 +186,23 @@ public final class HomeActivity extends Activity {
             sleepControl.setAlpha(0.72f);
         }
         CoverService.setMetricsHidden(saver);
+    }
+
+    /** Screen on, and the controller enabled, once Watch is on screen again. */
+    private void powerWatchOn() {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
+        if (power != null) {
+            PowerManager.WakeLock wake = power.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK
+                            | PowerManager.ACQUIRE_CAUSES_WAKEUP
+                            | PowerManager.ON_AFTER_RELEASE,
+                    "treadcover:watch");
+            wake.setReferenceCounted(false);
+            wake.acquire(5_000L);
+        }
+        CoverService.powerController();
     }
 
     private void armSaver() {
