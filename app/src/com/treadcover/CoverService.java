@@ -67,6 +67,9 @@ public final class CoverService extends Service implements TreadController.Liste
     /** Set on screen off so the next screen on (the monitor button) starts a fresh session. */
     private boolean monitorWasOff;
     private boolean screenReceiverRegistered;
+    private boolean summaryShowing;
+    private static final String BELT_STATUS = "onepeloton.intent.action.BELT_STATUS";
+    private static final String BELT_MOVING_EXTRA = "onepeloton.intent.extra.BELT_MOVING";
 
     /** Monitor power button. Screensaver does not turn the screen off, so it does not reset. */
     private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
@@ -83,6 +86,11 @@ public final class CoverService extends Service implements TreadController.Liste
                 monitorWasOff = false;
                 finishWorkout();
                 Log.i("CoverService", "metrics reset: monitor on");
+                return;
+            }
+            if (BELT_STATUS.equals(intent.getAction())
+                    && !intent.getBooleanExtra(BELT_MOVING_EXTRA, true)) {
+                onPhysicalStop();
             }
         }
     };
@@ -121,6 +129,7 @@ public final class CoverService extends Service implements TreadController.Liste
         IntentFilter screen = new IntentFilter();
         screen.addAction(Intent.ACTION_SCREEN_OFF);
         screen.addAction(Intent.ACTION_SCREEN_ON);
+        screen.addAction(BELT_STATUS);
         registerReceiver(screenReceiver, screen);
         screenReceiverRegistered = true;
     }
@@ -528,23 +537,44 @@ public final class CoverService extends Service implements TreadController.Liste
         buttons.addView(cancel);
 
         Button sure = pillButton("I'm sure", ACCENT, Color.rgb(8, 14, 12));
-        sure.setOnClickListener(v -> {
-            String incline = inclineView.getText().toString();
-            String mph = speedView.getText().toString();
-            String pace = paceView.getText().toString();
-            String time = timeView.getText().toString();
-            String miles = distanceView.getText().toString();
-            if (tread != null) {
-                tread.pauseMetrics();
-                tread.stopBelt();
-            }
-            showSummary(incline, mph, pace, time, miles);
-        });
+        sure.setOnClickListener(v -> confirmStop());
         buttons.addView(sure);
 
         card.addView(buttons);
         scrim.addView(card, cardParams());
         presentModal(scrim);
+    }
+
+    /** On-screen "I'm sure": ease the belt down and open the workout summary. */
+    private void confirmStop() {
+        String incline = inclineView.getText().toString();
+        String mph = speedView.getText().toString();
+        String pace = paceView.getText().toString();
+        String time = timeView.getText().toString();
+        String miles = distanceView.getText().toString();
+        if (tread != null) {
+            tread.pauseMetrics();
+            tread.stopBelt();
+        }
+        showSummary(incline, mph, pace, time, miles);
+    }
+
+    /**
+     * Physical stop on the tread. The controller already brings the belt to 0; freeze the
+     * timer and open the summary. Ignored when this app is the one slowing the belt.
+     */
+    private void onPhysicalStop() {
+        if (summaryShowing || !workoutControlsOn || tread == null || !tread.takeExternalStop()) {
+            return;
+        }
+        String incline = inclineView.getText().toString();
+        String mph = speedView.getText().toString();
+        String pace = paceView.getText().toString();
+        String time = timeView.getText().toString();
+        String miles = distanceView.getText().toString();
+        tread.pauseMetrics();
+        Log.i("CoverService", "physical stop: workout summary");
+        showSummary(incline, mph, pace, time, miles);
     }
 
     private void showSummary(String incline, String mph, String pace, String time, String miles) {
@@ -604,6 +634,7 @@ public final class CoverService extends Service implements TreadController.Liste
         card.addView(body, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         scrim.addView(card, cardParams());
+        summaryShowing = true;
         presentModal(scrim);
     }
 
@@ -622,6 +653,7 @@ public final class CoverService extends Service implements TreadController.Liste
 
     /** Zero miles and time, and drop pause or stop dialogs. Does not change speed or incline. */
     private void finishWorkout() {
+        summaryShowing = false;
         if (tread != null) {
             tread.resetSession();
         }

@@ -508,6 +508,22 @@ public final class TreadController {
     }
 
     /**
+     * The tread itself commanded a stop (physical stop button). Remember 0 so a later
+     * sync cannot speed the belt back up. Returns false when this app is already
+     * easing the belt down from the on-screen stop.
+     */
+    public boolean takeExternalStop() {
+        if (easingStop || tread == null) {
+            return false;
+        }
+        handler.removeCallbacks(easeStop);
+        targetSpeedTenths = 0;
+        call(SET_SPEED, 0);
+        Log.i(TAG, "external stop, target 0");
+        return true;
+    }
+
+    /**
      * Ease the belt to 0 mph after "I'm sure". Steps the target down; never raises it.
      * Does not change incline, person-present, or the safety key.
      */
