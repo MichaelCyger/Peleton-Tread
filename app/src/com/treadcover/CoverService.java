@@ -4,7 +4,9 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -62,6 +64,28 @@ public final class CoverService extends Service implements TreadController.Liste
     private static CoverService active;
     private static boolean metricsHidden;
     private static boolean beltMoving;
+    /** Set on screen off so the next screen on (the monitor button) starts a fresh session. */
+    private boolean monitorWasOff;
+    private boolean screenReceiverRegistered;
+
+    /** Monitor power button. Screensaver does not turn the screen off, so it does not reset. */
+    private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null) {
+                return;
+            }
+            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                monitorWasOff = true;
+                return;
+            }
+            if (Intent.ACTION_SCREEN_ON.equals(intent.getAction()) && monitorWasOff) {
+                monitorWasOff = false;
+                finishWorkout();
+                Log.i("CoverService", "metrics reset: monitor on");
+            }
+        }
+    };
 
     /** True while the belt is actually moving, whether or not a show is playing. */
     public static boolean isBeltMoving() {
@@ -94,6 +118,11 @@ public final class CoverService extends Service implements TreadController.Liste
         showCover();
         tread = new TreadController(this, this);
         tread.start();
+        IntentFilter screen = new IntentFilter();
+        screen.addAction(Intent.ACTION_SCREEN_OFF);
+        screen.addAction(Intent.ACTION_SCREEN_ON);
+        registerReceiver(screenReceiver, screen);
+        screenReceiverRegistered = true;
     }
 
     @Override
@@ -105,6 +134,10 @@ public final class CoverService extends Service implements TreadController.Liste
     public void onDestroy() {
         if (active == this) {
             active = null;
+        }
+        if (screenReceiverRegistered) {
+            unregisterReceiver(screenReceiver);
+            screenReceiverRegistered = false;
         }
         if (tread != null) {
             tread.stop();
@@ -587,13 +620,20 @@ public final class CoverService extends Service implements TreadController.Liste
         return col;
     }
 
+    /** Zero miles and time, and drop pause or stop dialogs. Does not change speed or incline. */
     private void finishWorkout() {
         if (tread != null) {
             tread.resetSession();
         }
-        distanceView.setText("0.00");
-        timeView.setText("0:00");
-        pillMiles.setText("0.00");
+        if (distanceView != null) {
+            distanceView.setText("0.00");
+        }
+        if (timeView != null) {
+            timeView.setText("0:00");
+        }
+        if (pillMiles != null) {
+            pillMiles.setText("0.00");
+        }
         setPausedAppearance(false);
         setWorkoutControls(false);
         dismissModal();
