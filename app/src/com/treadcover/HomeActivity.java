@@ -50,6 +50,7 @@ public final class HomeActivity extends Activity {
     private SleepButton sleepControl;
     private boolean resumed;
     private boolean sleepHeld;
+    private static HomeActivity foreground;
 
     private final Runnable startSaver = new Runnable() {
         @Override
@@ -94,6 +95,7 @@ public final class HomeActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        foreground = this;
         ensureOverlayRunning();
         // Rebuild so newly installed apps appear without a restart.
         setContentView(buildUi());
@@ -104,6 +106,9 @@ public final class HomeActivity extends Activity {
     @Override
     protected void onPause() {
         resumed = false;
+        if (foreground == this) {
+            foreground = null;
+        }
         handler.removeCallbacks(startSaver);
         handler.removeCallbacks(sleepHold);
         if (screensaver != null) {
@@ -136,8 +141,30 @@ public final class HomeActivity extends Activity {
         return super.dispatchTouchEvent(ev);
     }
 
+    /** The belt started moving. Leave Watch up instead of covering it. */
+    static void beltStarted() {
+        HomeActivity activity = foreground;
+        if (activity != null) {
+            activity.stopSaverBecauseBeltIsMoving();
+        }
+    }
+
+    private void stopSaverBecauseBeltIsMoving() {
+        if (screensaver != null && screensaver.isRunning()) {
+            screensaver.stop();
+            setWatchChrome(false);
+            Log.i("HomeActivity", "screensaver off, belt moving");
+        }
+        armSaver();
+    }
+
     private void beginSaver(boolean party) {
         if (!resumed || screensaver == null) {
+            return;
+        }
+        if (CoverService.isBeltMoving()) {
+            Log.i("HomeActivity", "screensaver skipped, belt moving");
+            armSaver();
             return;
         }
         handler.removeCallbacks(startSaver);

@@ -61,6 +61,12 @@ public final class CoverService extends Service implements TreadController.Liste
     private final Handler handler = new Handler(Looper.getMainLooper());
     private static CoverService active;
     private static boolean metricsHidden;
+    private static boolean beltMoving;
+
+    /** True while the belt is actually moving, whether or not a show is playing. */
+    public static boolean isBeltMoving() {
+        return beltMoving;
+    }
 
     /** Re-enable the belt controller. Does not change speed or incline. */
     public static void powerController() {
@@ -145,6 +151,13 @@ public final class CoverService extends Service implements TreadController.Liste
         distanceView.setText(String.format("%.2f", miles));
         timeView.setText(elapsed == null || elapsed.length() == 0 ? "0:00" : elapsed);
         pillMiles.setText(String.format("%.2f", miles));
+        boolean moving = speed > 0.05;
+        if (moving != beltMoving) {
+            beltMoving = moving;
+            if (moving) {
+                HomeActivity.beltStarted();
+            }
+        }
         boolean clockRunning = elapsed != null && elapsed.length() > 0
                 && (tread == null || !tread.isMetricsPaused());
         boolean paused = tread != null && tread.isMetricsPaused();

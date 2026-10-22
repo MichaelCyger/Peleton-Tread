@@ -86,6 +86,21 @@ public final class TreadController {
     private int lastUnlockResult = Integer.MIN_VALUE;
     private String sessionPin;
 
+    // Screen off puts the controller board to sleep and it locks itself. After screen on the
+    // board needs a moment before it accepts an unlock; one sent right away is dropped and
+    // affernet gives up on it 20 s later without retrying. So wait before asking, and ask
+    // again if affernet reports an unlock timeout (lock reason 5) or the board still says
+    // locked when the watchdog fires. All of this is ENABLE_TREAD only; no speed writes.
+    private static final long WAKE_DELAY_MS = 5_000L;
+    private static final long WAKE_TIMEOUT_MS = 22_000L;
+    private static final int WAKE_ATTEMPTS_MAX = 4;
+    private static final int LOCK_REASON_UNLOCK_TIMEOUT = 5;
+    private int wakeAttempts;
+    /** Lock byte from the board's sensor packets: TRUE locked, FALSE unlocked, null unknown. */
+    private volatile Boolean hwLocked;
+    private final Runnable wakeAttempt = this::sendEnableTread;
+    private final Runnable wakeWatchdog = this::onWakeWatchdog;
+
     public TreadController(Context context, Listener listener) {
         this.context = context.getApplicationContext();
         this.listener = listener;
@@ -136,6 +151,8 @@ public final class TreadController {
     public void stop() {
         polling = false;
         handler.removeCallbacks(poll);
+        handler.removeCallbacks(wakeAttempt);
+        handler.removeCallbacks(wakeWatchdog);
         try {
             context.unbindService(connection);
         } catch (IllegalArgumentException ignored) {
@@ -281,6 +298,11 @@ public final class TreadController {
                 public void onControlEvent(int eventCode) {
                     TreadController.this.onKnobEvent(eventCode);
                 }
+
+                @Override
+                public void onSensorData(int hardwareLock, int softwareLock) {
+                    TreadController.this.onSensorData(hardwareLock, softwareLock);
+                }
             });
         }
         Parcel data = Parcel.obtain();
@@ -355,21 +377,93 @@ public final class TreadController {
     }
 
     /**
-     * Turn the controller back on after the screen has been powered down.
-     * Does not write speed or incline.
+     * Called when the Watch screen comes back (screen on, resume, screensaver dismissed).
+     * Re-asserts person-present now and schedules ENABLE_TREAD for once the board has had
+     * time to wake. Does not write speed or incline.
      */
     public void powerOn() {
         if (tread == null) {
             return;
         }
         call(ENABLE_PERSON_PRESENT, 1);
-        callVoid(ENABLE_TREAD);
         beltAwake = true;
-        Log.i(TAG, "power on");
+        handler.removeCallbacks(wakeAttempt);
+        handler.removeCallbacks(wakeWatchdog);
+        wakeAttempts = 0;
+        handler.postDelayed(wakeAttempt, WAKE_DELAY_MS);
+        Log.i(TAG, "power on: hwLocked=" + hwLocked + ", enable tread in " + WAKE_DELAY_MS + " ms");
+    }
+
+    /** One ENABLE_TREAD, then a watchdog in case affernet's unlock request times out. */
+    private void sendEnableTread() {
+        if (tread == null) {
+            return;
+        }
+        wakeAttempts++;
+        callVoid(ENABLE_TREAD);
+        Log.i(TAG, "enable tread attempt " + wakeAttempts + " hwLocked=" + hwLocked);
+        handler.removeCallbacks(wakeWatchdog);
+        handler.postDelayed(wakeWatchdog, WAKE_TIMEOUT_MS);
+    }
+
+    private void onWakeWatchdog() {
+        if (Boolean.FALSE.equals(hwLocked)) {
+            Log.i(TAG, "board unlocked after attempt " + wakeAttempts);
+            return;
+        }
+        if (wakeAttempts >= WAKE_ATTEMPTS_MAX) {
+            Log.w(TAG, "board still locked after " + wakeAttempts
+                    + " attempts; waiting for the next screen wake");
+            return;
+        }
+        sendEnableTread();
+    }
+
+    /** Binder thread. Lock byte from each sensor packet; act only on changes. */
+    private void onSensorData(int hardwareLock, int softwareLock) {
+        boolean locked = hardwareLock != 0;
+        Boolean previous = hwLocked;
+        if (previous != null && previous == locked) {
+            return;
+        }
+        hwLocked = locked;
+        handler.post(() -> {
+            Log.i(TAG, "board lock byte=" + hardwareLock + " software lock=" + softwareLock
+                    + (previous == null ? " (first packet)" : locked ? " (locked)" : " (unlocked)"));
+            if (locked) {
+                return;
+            }
+            if (handler.hasCallbacks(wakeWatchdog)) {
+                handler.removeCallbacks(wakeWatchdog);
+                Log.i(TAG, "board unlocked after attempt " + wakeAttempts);
+            }
+            wakeAttempts = 0;
+            // Knob turns made while the board was locked never reached it; start from what
+            // the belt and deck are actually doing (0 mph when stopped). Read-only.
+            if (previous != null) {
+                resyncTargetsFromCurrent();
+            }
+        });
+    }
+
+    private void resyncTargetsFromCurrent() {
+        int curSp = readInt(GET_CURRENT_SPEED);
+        int curInc = readInt(GET_CURRENT_INCLINE);
+        if (curSp != Integer.MIN_VALUE) {
+            targetSpeedTenths = Math.max(0, curSp);
+        }
+        if (curInc != Integer.MIN_VALUE) {
+            targetInclineTenths = Math.max(0, curInc);
+        }
+        Log.i(TAG, "targets resynced speed=" + targetSpeedTenths + " incline=" + targetInclineTenths);
     }
 
     private void onKnobEvent(int eventCode) {
         if (!beltAwake || tread == null) {
+            return;
+        }
+        if (Boolean.TRUE.equals(hwLocked)) {
+            Log.i(TAG, "knob event " + eventCode + " ignored: board locked");
             return;
         }
         switch (eventCode) {
@@ -431,15 +525,22 @@ public final class TreadController {
     }
 
     /** Re-clear Tread Lock and re-wake the belt if the controller locks again. */
+    /** Binder thread. Affernet's lock state changes; reason 5 = its unlock request timed out. */
     private void onLockEvent(boolean locked, int reason) {
-        if (!locked || loadStoredPin() == null) {
-            return;
-        }
         handler.post(() -> {
-            unlockWithStoredPin();
-            if (lastUnlockResult == 0) {
-                ensureBeltReady();
+            Log.i(TAG, "lock event locked=" + locked + " reason=" + reason + " hwLocked=" + hwLocked);
+            if (!locked) {
+                if (reason == LOCK_REASON_UNLOCK_TIMEOUT && handler.hasCallbacks(wakeWatchdog)) {
+                    // The board dropped our unlock; do not wait out the rest of the watchdog.
+                    handler.removeCallbacks(wakeWatchdog);
+                    onWakeWatchdog();
+                }
+                return;
             }
+            if (loadStoredPin() == null) {
+                return;
+            }
+            unlockWithStoredPin();
         });
     }
 
