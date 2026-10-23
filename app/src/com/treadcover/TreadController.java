@@ -377,6 +377,10 @@ public final class TreadController {
             int cur = readInt(GET_CURRENT_INCLINE);
             targetInclineTenths = cur == Integer.MIN_VALUE ? 0 : Math.max(0, cur);
         }
+        // Safety: an unlock must never start or speed up the belt. Cap the target at
+        // what the belt is doing right now (0 when stopped); unknown speed counts as stopped.
+        int nowSp = readInt(GET_CURRENT_SPEED);
+        targetSpeedTenths = Math.min(targetSpeedTenths, nowSp == Integer.MIN_VALUE ? 0 : Math.max(0, nowSp));
         call(ENABLE_PERSON_PRESENT, 1);
         callVoid(ENABLE_TREAD);
         if (!easingStop) {
@@ -405,9 +409,30 @@ public final class TreadController {
         Log.i(TAG, "power on: hwLocked=" + hwLocked + ", enable tread in " + WAKE_DELAY_MS + " ms");
     }
 
+    /**
+     * The display button turned the screen off. Drop pending ENABLE_TREAD retries; the
+     * board answers each one by waking the tablet, which turned the screen back on.
+     */
+    public void screenOff() {
+        handler.removeCallbacks(wakeAttempt);
+        handler.removeCallbacks(wakeWatchdog);
+        wakeAttempts = 0;
+        Log.i(TAG, "screen off: enable retries cancelled");
+    }
+
+    private boolean screenInteractive() {
+        android.os.PowerManager power =
+                (android.os.PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        return power == null || power.isInteractive();
+    }
+
     /** One ENABLE_TREAD, then a watchdog in case affernet's unlock request times out. */
     private void sendEnableTread() {
         if (tread == null) {
+            return;
+        }
+        if (!screenInteractive()) {
+            Log.i(TAG, "screen off: skip enable tread (it would wake the tablet)");
             return;
         }
         wakeAttempts++;
