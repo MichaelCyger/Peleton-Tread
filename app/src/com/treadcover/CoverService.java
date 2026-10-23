@@ -80,6 +80,9 @@ public final class CoverService extends Service implements TreadController.Liste
             }
             if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
                 monitorWasOff = true;
+                if (tread != null) {
+                    tread.screenOff();
+                }
                 return;
             }
             if (Intent.ACTION_SCREEN_ON.equals(intent.getAction()) && monitorWasOff) {

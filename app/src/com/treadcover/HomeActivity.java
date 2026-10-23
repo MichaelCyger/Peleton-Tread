@@ -84,9 +84,9 @@ public final class HomeActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
-        setTurnScreenOn(true);
+        // Never turn a sleeping screen on. The button on the back of the
+        // screen decides; KEEP_SCREEN_ON only stops the idle timeout while Watch is up.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         ensureOverlayRunning();
         setContentView(buildUi());
     }
@@ -217,10 +217,11 @@ public final class HomeActivity extends Activity {
 
     /** Screen on, and the controller enabled, once Watch is on screen again. */
     private void powerWatchOn() {
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
-        if (power != null) {
+        // Screen off (button pressed): leave it off. Watch can come back to the front
+        // while the display sleeps, and that must not wake it.
+        if (power != null && power.isInteractive()) {
             PowerManager.WakeLock wake = power.newWakeLock(
                     PowerManager.SCREEN_BRIGHT_WAKE_LOCK
                             | PowerManager.ACQUIRE_CAUSES_WAKEUP
